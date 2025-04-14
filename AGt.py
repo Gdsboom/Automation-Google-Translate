@@ -4,6 +4,8 @@ from selenium import webdriver
 from selenium.webdriver.chrome.service import Service as ChromeService
 import win32clipboard
 import io
+import ctypes
+import asyncio
 
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
@@ -35,7 +37,7 @@ class DuckChat_Tor:
     service : str, optional
         Путь к драйверу браузера (например, "D:/geckodriver.exe").
     """
-    def __init__(self, tor_browser_path, headless, url, browser, service, model="GPT-4o"):
+    def __init__(self, tor_browser_path, headless, url, browser, service):
 
         try:
             self.original_clipboard = ImageGrab.grabclipboard()
@@ -44,7 +46,6 @@ class DuckChat_Tor:
             pass
 
         self.browser = browser
-        self.model = model
         self.headless = headless
         self.tor_browser_path = tor_browser_path  # "D:/Tor Browser/Browser/"
         self.service = service
@@ -56,6 +57,7 @@ class DuckChat_Tor:
         self.original_format = None  # 'text' или 'image'
 
         self.stop_processing = False
+        self.temp_file_path = None
 
     def inizalization(self):
         try:
@@ -195,7 +197,6 @@ class DuckChat_Tor:
             i += 1
 
     def save_to_local_clipboard(self, pil_image):
-        """Сохраняет изображение в локальный буфер (не трогает системный)"""
         self.local_clipboard.append(pil_image)
 
     def get_image(self):
@@ -206,10 +207,9 @@ class DuckChat_Tor:
             # Попробуем получить изображение из буфера обмена
             try:
                 image = ImageGrab.grabclipboard()
-                if isinstance(image, ImageGrab.Image.Image) and self.original_clipboard != image:  # Проверяем, что это изображение
-
-
-
+                if isinstance(image, list):
+                    image = Image.open(image[0])  # Открываем первый файл из списка
+                if image!=None and self.original_clipboard != image:  # Проверяем, что это изображение isinstance(image, ImageGrab.Image.Image)
                     #filename = self.get_next_filename()  # Получаем следующее имя файла
                     #image.save(filename)  # Укажите полный путь, если нужно сохранить в другой директории
                     #print(f"Скриншот сохранен как {filename}")
@@ -225,26 +225,31 @@ class DuckChat_Tor:
                 print(f"Ошибка: {e}")
             ''''''
             if time.time() - start_time > wait_time:
-                print("Время вышло")
+                print("Время вышло", isinstance(image, ImageGrab.Image.Image), self.original_clipboard, image)
                 break
 
 
 
 
-    def set_image(self):
-        while True:
-            if len(self.local_clipboard) > 0:
-                # Задержка перед выполнением (если нужно)
-                self.inizalization()
-                #self.__agree()
-                try:
-                    self.send_image_to_page(0) #self.original_clipboard
-                except:
-                    pass
-                time.sleep(1)
-                self.local_clipboard.pop(0)
-                print("Браузер закрыт")
-                self.__close_tor_browser()
+    async def set_image(self):
+        event = threading.Event()
+        #while True:
+        #if keyboard.press('esc'):
+            #break
+        if len(self.local_clipboard) > 0:
+            # Задержка перед выполнением (если нужно)
+            self.inizalization()
+            #self.__agree()
+            try:
+                #self.send_image_to_page(0) #self.original_clipboard
+                threading.Thread(target=self.send_image_to_page(event, 0)).start()
+            except:
+                pass
+            event.wait()
+            #time.sleep(1)
+            self.local_clipboard.pop(0)
+            print("Браузер закрыт")
+            self.__close_tor_browser()
 
 
     def __agree(self):
@@ -425,23 +430,24 @@ class DuckChat_Tor:
                 else:
                     img = Image.open(io.BytesIO(requests.get(img_src).content))
 
-                # Сохраняем изображение во временный файл
-                with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as temp_file:
-                    img.save(temp_file, format="PNG")
-                    temp_file_path = temp_file.name
+                if ( self.temp_file_path==None ):
+                    # Сохраняем изображение во временный файл
+                    with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as temp_file:
+                        img.save(temp_file, format="PNG")
+                        self.temp_file_path = temp_file.name
 
-                print(f"Изображение сохранено во временный файл в папке Temp: {temp_file_path}")
-
+                    #print(f"Изображение сохранено во временный файл в папке Temp: {temp_file_path}")
+                else:
+                    # Сохраняем изображение по заданному пути
+                    img.save(self.temp_file_path, format="PNG")
                 # Открываем изображение с помощью стандартной программы просмотра
-                os.startfile(temp_file_path)
+                os.startfile(self.temp_file_path)
 
                 #print("Изображение открыто в стандартной программе просмотра.")
 
         except Exception as e:
             print(f"Ошибка: {e}")
             # Экстренный скриншот всей страницы для диагностики
-
-
             html = self.driver.page_source
             print(html)
             self.driver.save_screenshot("debug_screenshot.png")
@@ -565,7 +571,7 @@ class DuckChat_Tor:
 
         return temp_path
 
-    def send_image_to_page(self, image_index=0):
+    def send_image_to_page(self, event, image_index=0):
 
         """Отправляет изображение из локального буфера на страницу"""
         if not self.local_clipboard:
@@ -653,7 +659,7 @@ class DuckChat_Tor:
 
 
         self.download_and_open_image()
-
+        event.set()
         # Выполняем вставку
         #self.driver.execute_script(js)
 
@@ -771,6 +777,75 @@ class DuckChat_Tor:
         print("Файл успешно перетащен в поле загрузки!")
         time.sleep(2)
 '''
+
+
+# Настройка WinAPI
+user32 = ctypes.windll.user32
+kernel32 = ctypes.windll.kernel32
+
+CF_BITMAP = 2
+WM_CLIPBOARDUPDATE = 0x031D
+event_set_get = threading.Event()
+
+# Создаём окно для получения сообщений
+class ClipboardWatcher(threading.Thread):
+    def __init__(self, DT):
+        super().__init__(daemon=True)
+        self.running = True
+        self.last_data = None
+        self.DT = DT
+
+    def run(self):
+        # Создаём невидимое окно для обработки сообщений
+        hwnd = user32.CreateWindowExA(
+            0, b"STATIC", None, 0, 0, 0, 0, 0, None, None, None, None
+        )
+        user32.AddClipboardFormatListener(hwnd)
+
+        while self.running:
+            msg = ctypes.wintypes.MSG()
+            if user32.GetMessageA(ctypes.byref(msg), hwnd, 0, 0) > 0:
+                if msg.message == WM_CLIPBOARDUPDATE:
+                    self.handle_clipboard_change()
+            time.sleep(0.01)
+
+    def handle_clipboard_change(self):
+        try:
+            user32.OpenClipboard(0)
+            if user32.IsClipboardFormatAvailable(CF_BITMAP):
+                data = user32.GetClipboardData(CF_BITMAP)
+                if data != self.last_data:
+                    self.last_data = data
+                    self.DT.get_image()
+                    event_set_get.set()
+                    #self.DT.set_image()
+        finally:
+            user32.CloseClipboard()
+
+    def stop(self):
+        self.running = False
+
+
+
+class GIThread(threading.Thread):
+    def __init__(self, DT):
+        super().__init__()
+        self.DT = DT
+        self._stop_event = threading.Event()
+
+    def run(self):
+        event_set_get.wait()
+        while not self._stop_event.is_set():
+            if ( len(DT.local_clipboard) == 0 ):
+                event_set_get.clear()
+                event_set_get.wait()
+            if len(DT.local_clipboard) > 0:
+                asyncio.run(self.DT.set_image())
+            time.sleep(0.01)
+
+
+    def stop(self):
+        self._stop_event.set()
 
 
 
@@ -893,17 +968,14 @@ if __name__ == "__main__":
 
     start_time = time.time()
     DT = DuckChat_Tor("C:/Program Files/Google/Chrome/Application/", True, "https://translate.google.com/?sl=auto&tl=ru&op=images", browser="chrome.exe",
-                      service="D:/chromedriver.exe", model="GPT-4o")
+                      service="D:/chromedriver.exe")
 
-    try:
-        # Обработка Print Screen
-        keyboard.on_press_key('print screen', lambda _: DT.get_image())
-    except Exception as e:
-        #pass
-        print(f"Ошибка при обработке: {e}")
-    set_thread = threading.Thread(target=DT.set_image())
-    set_thread.daemon = True
-    set_thread.start()
+    watcher = ClipboardWatcher(DT)
+    watcher.daemon = True
+    gets = GIThread(DT)
+    gets.daemon = True
+    watcher.start()
+    gets.start()
     # Обработка Win+Shift+S
     #keyboard.on_press_key('win+shift+s', run_get_image)
 
@@ -914,7 +986,13 @@ if __name__ == "__main__":
 
     keyboard.wait('esc')  # Ожидание нажатия клавиши ESC для выхода
 
-    DT.stop_processing = True
+    try:
+        print(DT.temp_file_path)
+        os.remove(DT.temp_file_path)
+    except Exception as e:
+        print(f"Ошибка при удалении временного файла: {e}")
+
+    #DT.stop_processing = True
     #set_thread.join()  # ждем завершения цикла
     #print(proverka.test("да", headless = False))
     print("Прога завершила работу, Time общее:", time.time() - start_time)
