@@ -37,7 +37,7 @@ class DuckChat_Tor:
     service : str, optional
         Путь к драйверу браузера (например, "D:/geckodriver.exe").
     """
-    def __init__(self, tor_browser_path, headless, url, browser, service):
+    def __init__(self, tor_browser_path, headless, url, browser, service=""):
 
         try:
             self.original_clipboard = ImageGrab.grabclipboard()
@@ -133,7 +133,11 @@ class DuckChat_Tor:
         self.chrome_options.add_argument("--incognito")  # Режим инкогнито
         self.chrome_options.add_argument("--disable-features=TrackingProtection")
         # Инициализация драйвера Chrome
-        self.driver = webdriver.Chrome(service=ChromeService(self.service), options=self.chrome_options)
+        #self.driver = webdriver.Chrome(service=ChromeService(self.service), options=self.chrome_options)
+
+        from webdriver_manager.chrome import ChromeDriverManager
+        self.driver = webdriver.Chrome(service=ChromeService(ChromeDriverManager().install()), options=self.chrome_options)
+
         while True:
             # Ожидание появления элемента <head>
             try:
@@ -967,8 +971,7 @@ if __name__ == "__main__":
 
 
     start_time = time.time()
-    DT = DuckChat_Tor("C:/Program Files/Google/Chrome/Application/", True, "https://translate.google.com/?sl=auto&tl=ru&op=images", browser="chrome.exe",
-                      service="D:/chromedriver.exe")
+    DT = DuckChat_Tor("C:/Program Files/Google/Chrome/Application/", True, "https://translate.google.com/?sl=auto&tl=ru&op=images", browser="chrome.exe")
 
     watcher = ClipboardWatcher(DT)
     watcher.daemon = True
